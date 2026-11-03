@@ -24,9 +24,9 @@ from src.data.registry import get_spec
 from src.data.sequence_dataset import SequenceDataset
 from src.evaluation.rollout_dt import evaluate_dt
 from src.models.decision_transformer import build_dt
-from src.utils.config import Config, load_config, save_config
+from src.utils.config import Config, load_config, load_experiment_config, save_config
 from src.utils.logger import Logger
-from src.utils.seed import get_device, set_seed
+from src.utils.seed import configure_threads, device_for, set_seed
 
 
 def load_rtg_file(path: str | Path, n_trajs: int) -> list[np.ndarray]:
@@ -64,13 +64,15 @@ def train(
     rtg_file: str | None = None,
     output_dir: str | None = None,
     data_overrides: list[str] = (),
+    device: str | None = None,
 ) -> dict:
     spec = get_spec(dataset)
     cfg = load_config("dt.yaml", overrides, domain=spec.domain)
     data_cfg = load_config("data.yaml", data_overrides)
-    exp_cfg = load_config("experiment.yaml")
+    exp_cfg = load_experiment_config()
     set_seed(seed, exp_cfg.deterministic)
-    device = get_device(exp_cfg.device)
+    device = device_for("dt", exp_cfg, device)
+    threads = configure_threads(exp_cfg)
     rng = np.random.default_rng(seed)
 
     out = Path(output_dir or exp_cfg.output_dir) / method / dataset / f"seed{seed}"
@@ -79,13 +81,15 @@ def train(
                         "method": method, "rtg_file": rtg_file}), out / "config.yaml")
 
     # --- données ---------------------------------------------------------------------
-    ds = load_dataset(dataset, root=data_cfg.root, max_return_quantile=data_cfg.max_return_quantile)
+    ds = load_dataset(dataset, root=data_cfg.root, max_return_quantile=data_cfg.max_return_quantile,
+                      sources=data_cfg.download_sources)
     rtgs = load_rtg_file(rtg_file, len(ds.trajectories)) if rtg_file else None
     seq = SequenceDataset(
         ds, cfg.model.context_len, cfg.return_scale[spec.domain], cfg.model.max_timestep,
         rtgs=rtgs, normalize_states=data_cfg.normalize_states,
     )
-    print(f"[dt] {dataset} : {len(ds.trajectories)} trajectoires, {len(seq)} pas | device={device} | sortie={out}")
+    print(f"[dt] {dataset} : {len(ds.trajectories)} trajectoires, {len(seq)} pas | device={device}"
+          f"{f', {threads} threads' if threads else ''} | sortie={out}")
 
     # --- modèle / optimisation ------------------------------------------------------
     model = build_dt(cfg.model, seq.obs_dim, seq.act_dim).to(device)
@@ -105,7 +109,8 @@ def train(
 
     # --- boucle -------------------------------------------------------------------
     model.train()
-    t0, losses = time.time(), []
+    # Pertes accumulées sur le device : une seule synchronisation par période de log (coûteuse sur GPU/MPS)
+    t0, loss_sum, n_loss = time.time(), torch.zeros((), device=device), 0
     for step in range(1, cfg.train.max_steps + 1):
         batch = {k: torch.as_tensor(v, device=device) for k, v in seq.sample(cfg.train.batch_size, rng).items()}
         loss = dt_loss(model, batch)
@@ -114,14 +119,16 @@ def train(
         torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.train.grad_clip)
         opt.step()
         sched.step()
-        losses.append(loss.item())
+        loss_sum += loss.detach()
+        n_loss += 1
 
         if step % cfg.train.log_every == 0:
-            m = {"train/action_mse": float(np.mean(losses)), "train/lr": sched.get_last_lr()[0],
+            m = {"train/action_mse": loss_sum.item() / n_loss, "train/lr": sched.get_last_lr()[0],
                  "train/steps_per_s": cfg.train.log_every / (time.time() - t0)}
             logger.log(m, step)
             logger.print(m, step)
-            losses, t0 = [], time.time()
+            loss_sum.zero_()
+            n_loss, t0 = 0, time.time()
 
         if cfg.train.eval_every and step % cfg.train.eval_every == 0 and step < cfg.train.max_steps:
             for r in evaluate_all_targets(model, spec, cfg, seq, cfg.eval.episodes, seed, device):
@@ -166,8 +173,9 @@ def main() -> None:
     p.add_argument("--output-dir", default=None)
     p.add_argument("--set", nargs="*", default=[], metavar="CLÉ=VALEUR", help="surcharges de config/dt.yaml")
     p.add_argument("--data-set", nargs="*", default=[], metavar="CLÉ=VALEUR", help="surcharges de config/data.yaml")
+    p.add_argument("--device", default=None, help="cpu | mps | cuda (défaut : config/experiment.yaml)")
     a = p.parse_args()
-    train(a.dataset, a.seed, a.set, a.method, a.rtg_file, a.output_dir, a.data_set)
+    train(a.dataset, a.seed, a.set, a.method, a.rtg_file, a.output_dir, a.data_set, a.device)
 
 
 if __name__ == "__main__":

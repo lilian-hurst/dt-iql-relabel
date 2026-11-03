@@ -17,17 +17,63 @@ pytest -q                               # tests hors-ligne du pipeline de donné
 
 ## Données
 
+Ce sont les vrais datasets D4RL, ceux du papier DT :
+
 | Tâches | Source | Évaluation |
 |---|---|---|
-| halfcheetah / hopper / walker2d × medium, medium-replay, medium-expert | HDF5 officiels D4RL v2 (les mêmes que dans le papier DT), téléchargés dans `datasets/` | Gymnasium `*-v4`, MuJoCo 3 |
-| kitchen-complete / partial / mixed | Minari `D4RL/kitchen/*-v2` | `FrankaKitchen-v1` |
+| halfcheetah / hopper / walker2d × medium, medium-replay, medium-expert | HDF5 officiels D4RL v2 : serveur du RAIL (Berkeley), sinon copie identique sur Hugging Face ([`imone/D4RL`](https://huggingface.co/datasets/imone/D4RL)) | Gymnasium `*-v4`, MuJoCo 3 |
+| kitchen-complete / partial / mixed | Minari [`D4RL/kitchen/*-v2`](https://minari.farama.org/datasets/D4RL/kitchen/) (Hugging Face `farama-minari`) | `FrankaKitchen-v1`, épisodes de 450 pas |
+
+```bash
+python scripts/download_datasets.py                     # 9 datasets Gym-MuJoCo, avec résumé de vérification
+python scripts/download_datasets.py --suite kitchen     # Franka Kitchen (pip install -e ".[kitchen]")
+python scripts/check_env.py --dataset hopper-medium-replay-v2   # test de rejeu de la dynamique
+```
+
+Les sources sont essayées dans l'ordre de `download_sources` (`config/data.yaml`). Chaque fichier est
+vérifié (lecture HDF5, clés, longueurs cohérentes) avant d'être conservé dans `datasets/`
+(ou `$D4RL_DATASET_DIR`). Si les deux sources sont indisponibles, déposez les fichiers à la main dans ce
+dossier ou passez `--file`.
 
 Le paquet `d4rl` (mujoco-py) n'est pas utilisé : il est difficile à installer aujourd'hui.
-`check_env.py` rejoue des transitions du dataset dans l'env (via qpos/qvel) pour vérifier que la
-dynamique MuJoCo 3 correspond bien aux données. Sans accès réseau, on peut passer un fichier local avec
-`--file`, ou définir `D4RL_DATASET_DIR`.
+`check_env.py` rejoue des transitions du dataset dans l'environnement (via qpos/qvel) pour vérifier que
+la dynamique de MuJoCo 3 correspond bien aux données.
+
+Le miroir [`edbeeching/decision_transformer_gym_replay`](https://huggingface.co/datasets/edbeeching/decision_transformer_gym_replay)
+(tutoriel DT de Hugging Face) n'est pas utilisé : il n'a ni medium-expert, ni timeouts, ni qpos/qvel.
+Les datasets Minari PointMaze ne remplacent pas Maze2D : leur but change à chaque épisode, ce qui
+demanderait une politique conditionnée par le but.
 
 Le score reporté est le score normalisé D4RL `100·(R − R_random)/(R_expert − R_random)` (`src/evaluation/normalization.py`).
+
+## Entraîner sur un Mac Apple Silicon (M1 à M4)
+
+```bash
+# Python 3.11 ou 3.12 natif arm64 (uv, Homebrew ou Miniforge), puis :
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev,kitchen]"                       # PyTorch macOS avec GPU Metal (MPS)
+python scripts/download_datasets.py --suite mujoco kitchen
+pytest -q && python scripts/check_env.py
+python scripts/benchmark_device.py --write            # cpu ou mps, par algorithme, mesuré sur la machine
+python experiments/run_experiments.py experiments/configs/smoke.yaml          # chaîne complète, minutes
+python experiments/run_experiments.py experiments/configs/laptop.yaml --dry-run --jobs 4   # durée estimée
+caffeinate -i python experiments/run_experiments.py experiments/configs/laptop.yaml --jobs 4
+caffeinate -i python experiments/run_ablations.py --config experiments/configs/ablations_laptop.yaml --jobs 4
+```
+
+- **Device :** `device: auto` choisit MPS sur Mac. Mais pour de si petits réseaux, le CPU peut être plus
+  rapide (surtout pour IQL). `benchmark_device.py --write` mesure les deux et écrit le meilleur choix par
+  algorithme, avec les débits, dans `config/experiment.local.yaml` (non versionné). On peut forcer le
+  device avec `--device cpu|mps` ou `DTIQL_DEVICE`.
+- **Parallélisme :** avec `--jobs N`, les cœurs CPU sont répartis automatiquement entre les jobs
+  (`DTIQL_THREADS`). Les opérations non disponibles sur MPS retombent sur le CPU
+  (`PYTORCH_ENABLE_MPS_FALLBACK=1`, fixé par le paquet).
+- **Budget :** `laptop.yaml` reproduit DT sur les 9 datasets (3 seeds, 100k pas comme le papier) et
+  limite les méthodes avec critique aux 3 datasets medium-replay, avec des critiques à 300k pas et IQL à
+  500k. Cela fait 108 jobs. `ablations_laptop.yaml` réutilise ses runs : seuls 108 jobs de plus.
+  `--dry-run` affiche la durée estimée à partir des débits mesurés.
+- **Pratique :** branchez le Mac sur secteur ; `caffeinate -i` empêche la mise en veille. Un run
+  interrompu repart de zéro, mais l'expérience reprend après les runs déjà terminés.
 
 ## Structure
 
@@ -130,13 +176,13 @@ python experiments/plot_results.py ablations                # tableaux + figures
 | `context_len` | longueur de contexte K | 1, 5, 20 | DT, IQL-DT (IQL) |
 | `relabel_strength` | α | 0, 0.25, 0.5, 1 | IQL-DT, QDT (DT, IQL) |
 | `q_threshold` | gain minimal (fraction de \|G\|) | 0, 0.05, 0.1, 0.25 | IQL-DT (DT) |
-| `critic_discount` | γ du critique | 0.99, 0.995, 0.999 | IQL-DT (DT) |
+| `critic_discount` | γ du critique | 0.99, 0.995, 0.999, 1 (règle exacte max(R_t, Q)) | IQL-DT (DT) |
 | `dataset_quality` | quantile de return conservé | 0.25, 0.5, 0.75, 1 | DT, IQL, QDT, IQL-DT |
 
 α = 0 laisse les RTG intacts : IQL-DT doit alors retrouver le score de DT, ce qui sert de contrôle de
 cohérence. Les runs à la configuration par défaut (K=20, α=1, seuil 0, γ=0.995, quantile 1) sont communs
 à toutes les ablations. Les critiques et relabellisations sont réutilisés quand le paramètre ne les
-change pas : l'ensemble représente 540 jobs au lieu de 846 sans partage (3 datasets × 3 seeds, voir `--dry-run`).
+change pas : l'ensemble représente 567 jobs au lieu de 873 sans partage (3 datasets × 3 seeds, voir `--dry-run`).
 
 Figures (PDF à texte éditable + PNG 300 dpi, dans `figures/`) :
 

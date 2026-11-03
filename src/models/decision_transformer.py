@@ -31,6 +31,7 @@ class CausalSelfAttention(nn.Module):
         self.resid_dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor, attn_mask: torch.Tensor) -> torch.Tensor:
+        """attn_mask : masque additif (0 = autorisé, -inf = interdit), diffusable en (B, h, T, T)."""
         B, T, C = x.shape
         q, k, v = self.qkv(x).split(C, dim=2)
         q, k, v = (z.view(B, T, self.n_heads, C // self.n_heads).transpose(1, 2) for z in (q, k, v))
@@ -133,8 +134,11 @@ class DecisionTransformer(nn.Module):
             # Chaque token peut s'attendre lui-même : évite les lignes entièrement masquées
             # (NaN) pour les tokens de padding, dont la sortie est ignorée par la loss.
             attn = attn | torch.eye(3 * K, dtype=torch.bool, device=h.device)
+        # Masque additif (0 / -inf), équivalent au masque booléen et accepté par tous les backends
+        # (CPU, CUDA, MPS) ; aucune ligne n'est entièrement à -inf grâce à la diagonale.
+        bias = torch.zeros(attn.shape, dtype=h.dtype, device=h.device).masked_fill(~attn, float("-inf"))
         for blk in self.blocks:
-            h = blk(h, attn)
+            h = blk(h, bias)
         h = self.ln_f(h).reshape(B, K, 3, -1)
         return self.predict_action(h[:, :, 1])  # sortie des tokens d'état -> a_t
 

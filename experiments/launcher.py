@@ -25,12 +25,14 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from src.data.relabel import critic_checkpoint, relabel_output_dir  # noqa: E402
-from src.utils.config import Config, load_config, load_yaml  # noqa: E402
+from src.utils.config import Config, load_config, load_experiment_config, load_yaml  # noqa: E402
 
 EXPERIMENT_DEFAULTS = {
     "name": "default", "datasets": "mujoco", "methods": ["dt"], "seeds": [0], "output_dir": None,
     "dt_overrides": [], "iql_overrides": [], "cql_overrides": [], "critic_overrides": [],
     "relabel_overrides": [], "data_overrides": [],
+    # Datasets propres à une méthode (sinon `datasets`), ex. {qdt: [hopper-medium-replay-v2]}
+    "method_datasets": {},
 }
 
 
@@ -67,7 +69,7 @@ def resolve_datasets(spec) -> list[str]:
 
 
 def runs_dir_of(exp: Config) -> Path:
-    base = Path(exp.output_dir or load_yaml("experiment.yaml").output_dir)
+    base = Path(exp.output_dir or load_experiment_config().output_dir)
     return (base if base.is_absolute() else REPO / base) / exp.name
 
 
@@ -86,13 +88,21 @@ def plan_jobs(exp: Config, python: str = sys.executable, suffix: str = "") -> li
     def add(job: Job) -> None:
         jobs.setdefault(str(job.done_file), job)  # critiques partagés entre méthodes : dédupliqués
 
-    for ds in resolve_datasets(exp.datasets):
+    default_ds = resolve_datasets(exp.datasets)
+    per_method = {m: resolve_datasets(v) for m, v in (exp.get("method_datasets") or {}).items()}
+    unknown = set(per_method) - set(exp.methods)
+    if unknown:
+        raise KeyError(f"method_datasets : méthodes absentes de `methods` : {sorted(unknown)}")
+    all_ds = list(dict.fromkeys(default_ds + [d for v in per_method.values() for d in v]))
+    for ds in all_ds:
         for seed in exp.seeds:
             common = ["--dataset", ds, "--seed", str(seed), "--output-dir", str(runs),
                       *_set("--data-set", exp.data_overrides)]
             for m in exp.methods:
                 if m not in methods_cfg:
                     raise KeyError(f"méthode inconnue {m!r} ; voir config/methods.yaml : {list(methods_cfg)}")
+                if ds not in per_method.get(m, default_ds):
+                    continue
                 mc = methods_cfg[m]
                 name = f"{m}{suffix}"
                 out = runs / name / ds / f"seed{seed}" / "results.json"
@@ -141,6 +151,37 @@ def describe_jobs(jobs: list[Job]) -> str:
     return ", ".join(f"{n} {k}" for k, n in counts.items())
 
 
+# Durée fixe approximative hors pas de gradient (évaluations en environnement, chargement), en heures
+_OVERHEAD_H = {"dt": 0.15, "iql": 0.05, "cql": 0.05, "relabel": 0.05}
+
+
+def job_hours(job: Job, throughput: dict) -> float | None:
+    """Durée estimée d'un job à partir des pas/s mesurés (scripts/benchmark_device.py) ; None si inconnu."""
+    module = job.cmd[2]
+    if module == "src.training.relabel_returns":
+        return _OVERHEAD_H["relabel"]
+    algo = "dt" if module == "src.training.train_dt" else job.cmd[job.cmd.index("--algo") + 1]
+    sps = (throughput or {}).get(algo)
+    if not sps:
+        return None
+    steps = load_config(f"{algo}.yaml").train.max_steps
+    for arg in job.cmd:
+        if arg.startswith("train.max_steps="):
+            steps = int(float(arg.split("=", 1)[1]))
+    return steps / float(sps) / 3600 + _OVERHEAD_H[algo]
+
+
+def estimate(jobs: list[Job], workers: int = 1) -> str:
+    """Estimation de la durée totale (somme des jobs) et du temps écoulé avec `workers` jobs parallèles."""
+    throughput = load_experiment_config().get("throughput") or {}
+    hours = [job_hours(j, throughput) for j in jobs]
+    if any(h is None for h in hours):
+        return ("durée non estimée : mesurez la machine avec `python scripts/benchmark_device.py --write`")
+    total = sum(hours)
+    return (f"≈ {total:.0f} h de calcul, soit ≈ {total / max(workers, 1):.0f} h avec --jobs {workers} "
+            f"(borne basse : les jobs parallèles se partagent la machine)")
+
+
 def run_jobs(jobs: list[Job], runs_dir: Path, workers: int = 1, gpus: list[str] | None = None,
              force: bool = False, dry_run: bool = False) -> dict[str, str]:
     """Exécute les jobs phase par phase ; renvoie {nom du job: statut}."""
@@ -158,11 +199,19 @@ def run_jobs(jobs: list[Job], runs_dir: Path, workers: int = 1, gpus: list[str] 
         gpu_q.put(gpus[i % len(gpus)] if gpus else None)
     total, counter = len(jobs), [0]
 
+    # Jobs en parallèle : on répartit les cœurs CPU entre eux (sinon chaque processus PyTorch prend
+    # tous les cœurs et ils se gênent), sauf si DTIQL_THREADS est déjà fixé.
+    threads = None
+    if workers > 1 and "DTIQL_THREADS" not in os.environ:
+        threads = str(max(1, (os.cpu_count() or 1) // workers))
+
     def run_one(job: Job) -> str:
         gpu = gpu_q.get()
         env = dict(os.environ)
         if gpu is not None:
             env["CUDA_VISIBLE_DEVICES"] = str(gpu)
+        if threads:
+            env.update(DTIQL_THREADS=threads, OMP_NUM_THREADS=threads, MKL_NUM_THREADS=threads)
         log = log_dir / (job.name.replace("/", "__") + ".log")
         log.parent.mkdir(parents=True, exist_ok=True)
         t0 = time.time()

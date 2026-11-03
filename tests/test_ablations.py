@@ -58,7 +58,7 @@ def test_jobs_reuse_critics_and_relabel(plans):
     h0 = [c for c in critics if "hopper" in c and c.endswith("seed0/results.json")]
     assert "shared/iql_critic/hopper-medium-replay-v2/seed0/results.json" in h0
     assert "shared/cql_critic/hopper-medium-replay-v2/seed0/results.json" in h0
-    assert len(h0) == 2 + 2 + 3 * 2   # partagés + γ∈{0.99,0.999} + quantiles {0.25,0.5,0.75} x (IQL, CQL)
+    assert len(h0) == 2 + 3 + 3 * 2   # partagés + γ∈{0.99,0.999,1} + quantiles {0.25,0.5,0.75} x (IQL, CQL)
     # α=0.5 relabellise avec le critique partagé dans son propre dossier
     alpha = next(j for j in jobs.values() if rel(j).startswith("shared/relabel/iql_max_q_a0.5/hopper"))
     assert alpha.deps[0].relative_to(root / "ablations").parts[:2] == ("shared", "iql_critic")
@@ -95,3 +95,20 @@ def test_report_tables_and_figure(plans):
     assert (root / "res" / "table.tex").read_text().startswith("\\begin{tabular}")
     if plot:
         assert (root / "fig" / "context_len.pdf").exists() and (root / "fig" / "context_len.png").exists()
+
+
+def test_base_experiment_runs_are_reused(tmp_path):
+    from launcher import load_experiment
+
+    repo = Path(__file__).resolve().parents[1]
+    exp = load_experiment(repo / "experiments/configs/laptop.yaml", output_dir=str(tmp_path))
+    main = {str(j.done_file) for j in plan_jobs(exp)}
+    defaults, abl = load_ablations(repo / "experiments/configs/ablations_laptop.yaml")
+    assert defaults.name == "laptop" and defaults.seeds == [0, 1, 2]
+    assert "train.max_steps=300000" in defaults.overrides.critic_overrides
+    manifest, exps = plan_ablation("context_len", abl.context_len, defaults, str(tmp_path))
+    assert _dirs(manifest, "iql_dt")["20"] == "iql_dt"                 # dossier de l'expérience laptop
+    assert _dirs(manifest, "dt")["5"] == "dt__context_len5"
+    abl_files = {str(j.done_file) for e, s in exps for j in plan_jobs(e, suffix=s)}
+    default_runs = {f for f in abl_files if "__" not in f}
+    assert default_runs and default_runs <= main                       # aucun recalcul des runs par défaut

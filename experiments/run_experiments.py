@@ -22,7 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from aggregate import aggregate  # noqa: E402
-from launcher import describe_jobs, load_experiment, plan_jobs, run_jobs, runs_dir_of  # noqa: E402
+from launcher import describe_jobs, estimate, load_experiment, plan_jobs, run_jobs, runs_dir_of  # noqa: E402
 
 
 def main() -> int:
@@ -44,6 +44,8 @@ def main() -> int:
     runs = runs_dir_of(exp)
     jobs = plan_jobs(exp)
     print(f"[experiment] {exp.name} : {len(jobs)} jobs ({describe_jobs(jobs)}) -> {runs}")
+    pending = [j for j in jobs if a.force or not j.done_file.exists()]
+    print(f"[experiment] {len(pending)} à exécuter : {estimate(pending, a.jobs)}")
     status = run_jobs(jobs, runs, workers=a.jobs, gpus=a.gpus, force=a.force, dry_run=a.dry_run)
     if not a.dry_run:
         aggregate(runs, methods=list(exp.methods))

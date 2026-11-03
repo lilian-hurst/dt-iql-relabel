@@ -7,7 +7,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-D4RL_HDF5_BASE = "http://rail.eecs.berkeley.edu/datasets/offline_rl/gym_mujoco_v2"
+# Sources des fichiers HDF5 D4RL v2, essayées dans l'ordre (voir config/data.yaml : download_sources).
+#   official : serveur du RAIL (Berkeley), source d'origine utilisée par le papier DT ;
+#   hf_mirror : copie des mêmes fichiers HDF5, mêmes noms, sur Hugging Face (dataset imone/D4RL).
+D4RL_HDF5_SOURCES = {
+    "official": "http://rail.eecs.berkeley.edu/datasets/offline_rl/gym_mujoco_v2/{filename}",
+    "hf_mirror": "https://huggingface.co/datasets/imone/D4RL/resolve/main/{filename}",
+}
 
 MUJOCO_ENVS = {
     # domaine : (id Gymnasium, score random, score expert)
@@ -23,6 +29,9 @@ KITCHEN_TASKS = {
     "partial": ["microwave", "kettle", "light switch", "slide cabinet"],
     "mixed": ["microwave", "kettle", "bottom burner", "light switch"],
 }
+# Horizon des datasets Minari D4RL/kitchen/*-v2 : 450 pas d'après la documentation Minari (280 dans l'ancien
+# D4RL v0). C'est une borne : l'environnement récupéré depuis le dataset Minari applique sa propre limite.
+KITCHEN_HORIZON = 450
 
 
 @dataclass(frozen=True)
@@ -42,6 +51,15 @@ class DatasetSpec:
     def filename(self) -> str:
         return self.source.rsplit("/", 1)[-1]
 
+    def download_urls(self, sources=("official", "hf_mirror")) -> list[tuple[str, str]]:
+        """[(source, URL)] à essayer dans l'ordre pour un dataset HDF5 (vide pour Minari)."""
+        if self.backend != "hdf5":
+            return []
+        unknown = [s for s in sources if s not in D4RL_HDF5_SOURCES]
+        if unknown:
+            raise KeyError(f"sources inconnues {unknown} ; choix : {list(D4RL_HDF5_SOURCES)}")
+        return [(s, D4RL_HDF5_SOURCES[s].format(filename=self.filename)) for s in sources]
+
 
 def get_spec(name: str) -> DatasetSpec:
     """Analyse un nom de type '<domaine>-<qualité>-v2'."""
@@ -57,7 +75,7 @@ def get_spec(name: str) -> DatasetSpec:
         fname = f"{domain}_{quality.replace('-', '_')}-v2.hdf5"
         return DatasetSpec(
             name=name, domain=domain, quality=quality, backend="hdf5",
-            source=f"{D4RL_HDF5_BASE}/{fname}", env_id=env_id,
+            source=D4RL_HDF5_SOURCES["official"].format(filename=fname), env_id=env_id,
             ref_min_score=rmin, ref_max_score=rmax, max_episode_len=1000,
         )
 
@@ -67,7 +85,7 @@ def get_spec(name: str) -> DatasetSpec:
         return DatasetSpec(
             name=name, domain="kitchen", quality=quality, backend="minari",
             source=f"D4RL/kitchen/{quality}-v2", env_id="FrankaKitchen-v1",
-            ref_min_score=0.0, ref_max_score=4.0, max_episode_len=280,
+            ref_min_score=0.0, ref_max_score=4.0, max_episode_len=KITCHEN_HORIZON,
             env_kwargs={"tasks_to_complete": KITCHEN_TASKS[quality]},
         )
 

@@ -1,0 +1,22 @@
+# Expérience complète dimensionnée pour un portable (ex. MacBook Pro M3 Max), 3 seeds.
+#   Phase 1 (reproduction)  : DT sur les 9 datasets Gym-MuJoCo, hyperparamètres du papier (100k pas).
+#   Phase 2 (stitching)     : baselines et méthodes avec critique sur les 3 datasets medium-replay.
+#   Budget réduit (à signaler dans le rapport) : IQL 500k pas et critiques 300k pas au lieu de 1M.
+#
+# Avant de lancer :
+#   python scripts/benchmark_device.py --write          # choisit cpu/mps par algorithme, mesure les débits
+#   python experiments/run_experiments.py experiments/configs/laptop.yaml --dry-run --jobs 4   # durée estimée
+# Puis, branché sur secteur et sans mise en veille :
+#   caffeinate -i python experiments/run_experiments.py experiments/configs/laptop.yaml --jobs 4
+name: laptop
+datasets: mujoco
+methods: [dt, iql, qdt, iql_dt, iql_qdt]
+method_datasets:
+  iql: &medium_replay [halfcheetah-medium-replay-v2, hopper-medium-replay-v2, walker2d-medium-replay-v2]
+  qdt: *medium_replay
+  iql_dt: *medium_replay
+  iql_qdt: *medium_replay
+seeds: [0, 1, 2]
+iql_overrides: [train.max_steps=500000]
+cql_overrides: [train.max_steps=500000]
+critic_overrides: [train.max_steps=300000]

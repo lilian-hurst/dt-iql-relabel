@@ -126,6 +126,19 @@ def load_config(
     return cfg
 
 
+def load_experiment_config() -> Config:
+    """config/experiment.yaml complété par config/experiment.local.yaml s'il existe.
+
+    Le fichier local (non versionné) contient les réglages propres à la machine : device par
+    algorithme, threads, débits mesurés par scripts/benchmark_device.py.
+    """
+    cfg = load_yaml("experiment.yaml")
+    local = CONFIG_DIR / "experiment.local.yaml"
+    if local.exists():
+        cfg = deep_merge(cfg, load_yaml(local))
+    return cfg
+
+
 def save_config(cfg: Mapping, path: str | Path) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

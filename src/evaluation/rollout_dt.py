@@ -35,8 +35,8 @@ def evaluate_dt(
     model.eval()
 
     envs = [make_env(spec) for _ in range(N)]
-    mean = torch.as_tensor(state_mean, device=device)
-    std = torch.as_tensor(state_std, device=device)
+    mean = torch.as_tensor(state_mean, dtype=torch.float32, device=device)  # MPS : pas de float64
+    std = torch.as_tensor(state_std, dtype=torch.float32, device=device)
     obs_dim, act_dim = model.obs_dim, model.act_dim
 
     S = torch.zeros(N, H, obs_dim, device=device)
@@ -58,15 +58,24 @@ def evaluate_dt(
         act = model.get_action(S[:, lo : t + 1], A[:, lo : t + 1], R[:, lo : t + 1], T[:, lo : t + 1])
         A[:, t] = act
         act_np = np.clip(act.cpu().numpy(), lo_act, hi_act)
-        for i in np.flatnonzero(~done):
+        alive = np.flatnonzero(~done)
+        next_obs = np.zeros((len(alive), obs_dim), dtype=np.float32)
+        rewards = np.zeros(len(alive), dtype=np.float32)
+        cont = np.zeros(len(alive), dtype=bool)
+        for j, i in enumerate(alive):
             o, r, term, trunc, _ = envs[i].step(act_np[i])
             ep_return[i] += r
             ep_len[i] += 1
+            next_obs[j], rewards[j] = o, r
             if term or trunc or t + 1 >= H:
                 done[i] = True
             else:
-                S[i, t + 1] = (torch.as_tensor(o, dtype=torch.float32, device=device) - mean) / std
-                R[i, t + 1] = R[i, t] - r / return_scale
+                cont[j] = True
+        if cont.any():  # une seule copie vers le device par pas de temps (coût fixe élevé sur MPS)
+            idx = torch.as_tensor(alive[cont], device=device)
+            S[idx, t + 1] = (torch.as_tensor(next_obs[cont], device=device) - mean) / std
+            r_t = torch.as_tensor(rewards[cont], device=device).unsqueeze(-1)
+            R[idx, t + 1] = R[idx, t] - r_t / return_scale
         if done.all():
             break
 

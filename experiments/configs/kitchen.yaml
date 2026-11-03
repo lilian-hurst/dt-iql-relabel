@@ -1,4 +1,4 @@
-# Franka Kitchen (manipulation, récompense creuse, horizon 280) : tâche de référence pour le stitching.
+# Franka Kitchen (manipulation, récompense creuse, horizon 450 dans Minari v2) : tâche de référence pour le stitching.
 # Requiert : pip install -e ".[kitchen]"
 name: kitchen
 datasets: kitchen

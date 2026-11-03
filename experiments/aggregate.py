@@ -26,12 +26,16 @@ from src.utils.config import load_yaml  # noqa: E402
 REFERENCE_FILE = Path(__file__).resolve().parent / "reference_scores.yaml"
 
 
-def collect(runs_dir: str | Path) -> pd.DataFrame:
-    """Un rang par run terminé ayant un score (les critiques de relabellisation n'en ont pas)."""
+def collect(runs_dir: str | Path, include_variants: bool = False) -> pd.DataFrame:
+    """Un rang par run terminé ayant un score (les critiques de relabellisation n'en ont pas).
+
+    Les variantes d'ablation rangées dans le même dossier (méthode suffixée, ex. 'dt__context_len5')
+    sont ignorées sauf include_variants=True : elles relèvent de run_ablations.py.
+    """
     rows = []
     for f in sorted(Path(runs_dir).glob("*/*/seed*/results.json")):
         r = json.loads(f.read_text())
-        if "score" not in r:
+        if "score" not in r or ("__" in r["method"] and not include_variants):
             continue
         rows.append({"method": r["method"], "dataset": r["dataset"], "seed": r["seed"], "score": r["score"],
                      "context_len": r.get("context_len"), "max_return_quantile": r.get("max_return_quantile", 1.0)})

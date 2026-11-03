@@ -79,7 +79,7 @@ class CQL(nn.Module):
         self.q_opt = torch.optim.Adam(self.qf.parameters(), lr=t.critic_lr)
         self.pi_opt = torch.optim.Adam(self.policy.parameters(), lr=t.policy_lr)
         self.alpha_opt = torch.optim.Adam([self.log_alpha], lr=t.alpha_lr)
-        self.register_buffer("n_updates", torch.zeros((), dtype=torch.long))
+        self.n_updates = 0  # entier Python : un tenseur sur le device forcerait une synchronisation par pas
 
     def critic_input(self, obs, timesteps):
         return critic_input(obs, timesteps, self.time_feature, self.max_timestep)
@@ -98,7 +98,7 @@ class CQL(nn.Module):
         q = self.q_target(self.critic_input(obs_rep, t_rep), a).view(B, N)
         return q.max(1).values if self.value_estimate == "max" else q.mean(1)
 
-    def update(self, b: dict[str, torch.Tensor]) -> dict[str, float]:
+    def update(self, b: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         obs, act, nxt = b["observations"], b["actions"], b["next_observations"]
         t = b.get("timesteps")
         x = self.critic_input(obs, t)
@@ -155,6 +155,6 @@ class CQL(nn.Module):
         polyak_update(self.qf, self.q_target, self.tau)
         self.n_updates += 1
 
-        return {"q_loss": td_loss.item(), "cql_penalty": 0.5 * (penalties[0] + penalties[1]).item(),
-                "q_mean": q1.mean().item(), "pi_loss": pi_loss.item(), "alpha": alpha.item(),
-                "entropy": -logp_pi.mean().item()}
+        return {"q_loss": td_loss.detach(), "cql_penalty": 0.5 * (penalties[0] + penalties[1]).detach(),
+                "q_mean": q1.mean().detach(), "pi_loss": pi_loss.detach(), "alpha": alpha,
+                "entropy": -logp_pi.mean().detach()}

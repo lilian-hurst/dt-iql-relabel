@@ -24,7 +24,7 @@ import numpy as np
 from src.data.d4rl_loader import load_dataset
 from src.data.relabel import (critic_checkpoint, relabel_output_dir, relabel_stats,
                               relabel_trajectory)
-from src.utils.config import load_config, save_config
+from src.utils.config import load_config, load_experiment_config, save_config
 
 
 def critic_values(agent, ck, tr: dict, device, chunk: int = 65536) -> tuple[np.ndarray, np.ndarray]:
@@ -53,13 +53,15 @@ def relabel(
     data_overrides: list[str] = (),
     output_dir: str | None = None,
     train_critic: bool = False,
+    device: str | None = None,
 ) -> Path:
     cfg = load_config("relabel.yaml", overrides)
     data_cfg = load_config("data.yaml", data_overrides)
-    exp_cfg = load_config("experiment.yaml")
+    exp_cfg = load_experiment_config()
     runs = Path(output_dir or exp_cfg.output_dir)
 
-    ds = load_dataset(dataset, root=data_cfg.root, max_return_quantile=data_cfg.max_return_quantile)
+    ds = load_dataset(dataset, root=data_cfg.root, max_return_quantile=data_cfg.max_return_quantile,
+                      sources=data_cfg.download_sources)
     tr = ds.transitions()
     lengths = ds.lengths()
     split = lambda x: np.split(x, np.cumsum(lengths)[:-1])
@@ -69,9 +71,10 @@ def relabel(
     gamma = 1.0
     if cfg.rule != "none":
         from src.training.train_offline import load_agent, train as train_offline
-        from src.utils.seed import get_device
+        from src.utils.seed import configure_threads, device_for
 
-        device = get_device(exp_cfg.device)
+        device = device_for(cfg.value_source, exp_cfg, device)
+        configure_threads(exp_cfg)
         critic = cfg.critics[cfg.value_source]
         ckpt = critic_checkpoint(cfg, dataset, seed, runs)
         if not ckpt.exists():
@@ -130,8 +133,9 @@ def main() -> None:
     p.add_argument("--output-dir", default=None)
     p.add_argument("--set", nargs="*", default=[], metavar="CLÉ=VALEUR", help="surcharges de config/relabel.yaml")
     p.add_argument("--data-set", nargs="*", default=[], metavar="CLÉ=VALEUR", help="surcharges de config/data.yaml")
+    p.add_argument("--device", default=None, help="cpu | mps | cuda (défaut : config/experiment.yaml)")
     a = p.parse_args()
-    relabel(a.dataset, a.seed, a.set, a.data_set, a.output_dir, a.train_critic)
+    relabel(a.dataset, a.seed, a.set, a.data_set, a.output_dir, a.train_critic, a.device)
 
 
 if __name__ == "__main__":

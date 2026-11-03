@@ -1,0 +1,42 @@
+# Ablations dimensionnées pour un portable, greffées sur experiments/configs/laptop.yaml :
+# les runs à la configuration par défaut (K=20, α=1, γ=0.995, quantile 1) SONT ceux de l'expérience
+# laptop (mêmes surcharges, même dossier runs/laptop/) et ne sont pas recalculés.
+#   python experiments/run_ablations.py --config experiments/configs/ablations_laptop.yaml --dry-run --jobs 4
+base_experiment: experiments/configs/laptop.yaml
+
+defaults:
+  datasets: [hopper-medium-replay-v2, walker2d-medium-replay-v2]
+  # seeds et surcharges : ceux de l'expérience de base
+
+ablations:
+  context_len:
+    label: Longueur de contexte K
+    param: dt_overrides
+    key: model.context_len
+    values: [1, 5, 20]
+    methods: [dt, iql_dt]
+    reference_methods: [iql]
+
+  relabel_strength:
+    label: Force de relabellisation α
+    param: relabel_overrides
+    key: alpha
+    values: [0.0, 0.5, 1.0]          # α = 0 : contrôle de cohérence (doit retrouver DT)
+    methods: [iql_dt]
+    reference_methods: [dt]
+
+  critic_discount:
+    label: γ du critique de relabellisation
+    param: critic_overrides
+    key: train.discount
+    values: [0.99, 0.995, 1.0]        # γ = 1 : règle exacte max(R_t, Q(s_t, a_t))
+    methods: [iql_dt]
+    reference_methods: [dt]
+
+  dataset_quality:
+    label: Quantile de return des trajectoires conservées
+    param: data_overrides
+    key: max_return_quantile
+    values: [0.5, 1.0]
+    methods: [dt, iql_dt]
+    reference_methods: []

@@ -9,3 +9,5 @@ checkpoints/
 results/
 figures/
 wandb/
+# Réglages propres à la machine (scripts/benchmark_device.py --write)
+config/experiment.local.yaml

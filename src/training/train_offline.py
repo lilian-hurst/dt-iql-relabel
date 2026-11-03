@@ -19,9 +19,9 @@ import torch
 from src.data.d4rl_loader import OfflineDataset, load_dataset
 from src.data.registry import get_spec
 from src.evaluation.rollout_policy import evaluate_policy
-from src.utils.config import Config, load_config, save_config
+from src.utils.config import Config, load_config, load_experiment_config, save_config
 from src.utils.logger import Logger
-from src.utils.seed import get_device, set_seed
+from src.utils.seed import configure_threads, device_for, set_seed
 
 
 def _algos() -> dict:
@@ -70,23 +70,28 @@ def train(
     method: str | None = None,
     output_dir: str | None = None,
     data_overrides: list[str] = (),
+    device: str | None = None,
 ) -> dict:
     cfg_file, agent_cls = _algos()[algo]
     method = method or algo
     spec = get_spec(dataset)
     cfg = load_config(cfg_file, overrides, domain=spec.domain)
     data_cfg = load_config("data.yaml", data_overrides)
-    exp_cfg = load_config("experiment.yaml")
+    exp_cfg = load_experiment_config()
     set_seed(seed, exp_cfg.deterministic)
-    device = get_device(exp_cfg.device)
-    gen = torch.Generator(device=device).manual_seed(seed)
+    device = device_for(algo, exp_cfg, device)
+    threads = configure_threads(exp_cfg)
+    # Indices des batchs tirés sur le device en CUDA, sur CPU sinon (générateur MPS non garanti)
+    gen_device = device if device.type == "cuda" else torch.device("cpu")
+    gen = torch.Generator(device=gen_device).manual_seed(seed)
 
     out = Path(output_dir or exp_cfg.output_dir) / method / dataset / f"seed{seed}"
     out.mkdir(parents=True, exist_ok=True)
     save_config(Config({algo: cfg, "data": data_cfg, "dataset": dataset, "seed": seed, "method": method}),
                 out / "config.yaml")
 
-    ds = load_dataset(dataset, root=data_cfg.root, max_return_quantile=data_cfg.max_return_quantile)
+    ds = load_dataset(dataset, root=data_cfg.root, max_return_quantile=data_cfg.max_return_quantile,
+                      sources=data_cfg.download_sources)
     if not data_cfg.normalize_states:
         ds.state_mean = np.zeros(ds.obs_dim, np.float32)
         ds.state_std = np.ones(ds.obs_dim, np.float32)
@@ -94,7 +99,8 @@ def train(
     buf = make_buffer(ds, scale, cfg.model.time_feature, device)
     n = buf["rewards"].shape[0]
     print(f"[{algo}] {dataset} : {n} transitions, reward_scale={scale:.4g}, γ={cfg.train.discount}, "
-          f"time_feature={cfg.model.time_feature} | device={device} | sortie={out}")
+          f"time_feature={cfg.model.time_feature} | device={device}"
+          f"{f', {threads} threads' if threads else ''} | sortie={out}")
 
     agent = agent_cls(ds.obs_dim, ds.act_dim, cfg.model, cfg.train, spec.max_episode_len).to(device)
     logger = Logger(out, exp_cfg.logger.backend, exp_cfg.logger.project, f"{method}-{dataset}-s{seed}",
@@ -120,19 +126,21 @@ def train(
         }, out / "model.pt")
 
     agent.train()
-    t0, acc = time.time(), {}
+    # Métriques accumulées sur le device : une seule synchronisation par période de log
+    t0, acc, n_acc = time.time(), {}, 0
     for step in range(1, cfg.train.max_steps + 1):
-        idx = torch.randint(0, n, (cfg.train.batch_size,), device=device, generator=gen)
+        idx = torch.randint(0, n, (cfg.train.batch_size,), device=gen_device, generator=gen).to(device)
         m = agent.update({k: v[idx] for k, v in buf.items()})
         for k, v in m.items():
-            acc.setdefault(k, []).append(v)
+            acc[k] = acc[k] + v if k in acc else v.clone()
+        n_acc += 1
 
         if step % cfg.train.log_every == 0:
-            row = {f"train/{k}": float(np.mean(v)) for k, v in acc.items()}
+            row = {f"train/{k}": float(v) / n_acc for k, v in acc.items()}
             row["train/steps_per_s"] = cfg.train.log_every / (time.time() - t0)
             logger.log(row, step)
             logger.print(row, step)
-            acc, t0 = {}, time.time()
+            acc, n_acc, t0 = {}, 0, time.time()
         if (cfg.train.train_policy and cfg.train.eval_every and step % cfg.train.eval_every == 0
                 and step < cfg.train.max_steps):
             r = evaluate(cfg.eval.episodes, seed)
@@ -169,9 +177,10 @@ def main(default_algo: str | None = None) -> None:
     p.add_argument("--output-dir", default=None)
     p.add_argument("--set", nargs="*", default=[], metavar="CLÉ=VALEUR", help="surcharges de config/<algo>.yaml")
     p.add_argument("--data-set", nargs="*", default=[], metavar="CLÉ=VALEUR", help="surcharges de config/data.yaml")
+    p.add_argument("--device", default=None, help="cpu | mps | cuda (défaut : config/experiment.yaml)")
     a = p.parse_args()
     algo = default_algo or a.algo
-    train(algo, a.dataset, a.seed, a.set, a.method, a.output_dir, a.data_set)
+    train(algo, a.dataset, a.seed, a.set, a.method, a.output_dir, a.data_set, a.device)
 
 
 if __name__ == "__main__":

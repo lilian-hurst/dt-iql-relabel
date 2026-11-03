@@ -31,7 +31,7 @@ def test_cql_penalty_keeps_ood_actions_below_data():
     for _ in range(1500):
         idx = torch.randint(0, n, (128,))
         m = agent.update({k: v[idx] for k, v in buf.items()})
-    assert np.isfinite(list(m.values())).all()
+    assert all(torch.isfinite(v).all() for v in m.values())   # tenseurs détachés
     q_data = agent.qf(obs, act).mean().item()
     q_ood = agent.qf(obs, torch.full((n, 1), -0.9)).mean().item()
     assert q_ood < q_data - 0.1

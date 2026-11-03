@@ -10,7 +10,7 @@ from src.data.registry import get_spec
 
 def test_kitchen_spec():
     s = get_spec("kitchen-mixed-v2")
-    assert s.backend == "minari" and s.max_episode_len == 280 and s.ref_max_score == 4.0
+    assert s.backend == "minari" and s.max_episode_len == 450 and s.ref_max_score == 4.0
     assert "bottom burner" in s.env_kwargs["tasks_to_complete"]
 
 

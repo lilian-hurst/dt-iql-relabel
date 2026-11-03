@@ -56,7 +56,7 @@ def test_iql_update_learns_one_step_rewards():
     for _ in range(2000):
         idx = torch.randint(0, n, (64,))
         m = agent.update({k: v[idx] for k, v in buf.items()})
-    assert np.isfinite(list(m.values())).all()
+    assert all(torch.isfinite(v).all() for v in m.values())   # tenseurs détachés
     err = (agent.qf(obs, act) - rew).abs().mean().item()
     assert err < 0.15
 

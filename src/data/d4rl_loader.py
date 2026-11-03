@@ -147,15 +147,20 @@ def dataset_root(root: str | os.PathLike | None = None) -> Path:
     return path
 
 
-def download(url: str, dest: Path) -> Path:
+DEFAULT_SOURCES = ("official", "hf_mirror")
+REQUIRED_HDF5_KEYS = ("observations", "actions", "rewards", "terminals")
+
+
+def download(url: str, dest: Path, timeout: float = 60.0) -> Path:
     """Téléchargement atomique (fichier temporaire puis renommage) avec barre de progression."""
     if dest.exists():
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
     print(f"[data] téléchargement {url} -> {dest}", file=sys.stderr)
     fd, tmp = tempfile.mkstemp(dir=dest.parent, suffix=".part")
+    req = urllib.request.Request(url, headers={"User-Agent": "dt-iql-relabel/0.1 (python-urllib)"})
     try:
-        with urllib.request.urlopen(url) as resp, os.fdopen(fd, "wb") as out:
+        with urllib.request.urlopen(req, timeout=timeout) as resp, os.fdopen(fd, "wb") as out:
             total = int(resp.headers.get("Content-Length") or 0)
             done = 0
             while chunk := resp.read(1 << 20):
@@ -164,11 +169,58 @@ def download(url: str, dest: Path) -> Path:
                 if total:
                     print(f"\r  {done / 1e6:7.1f} / {total / 1e6:.1f} Mo", end="", file=sys.stderr)
         print(file=sys.stderr)
+        if total and done != total:
+            raise IOError(f"téléchargement incomplet ({done} / {total} octets)")
         shutil.move(tmp, dest)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
     return dest
+
+
+def check_hdf5(path: str | Path) -> str | None:
+    """None si le fichier est un dataset D4RL lisible, sinon la raison du rejet."""
+    import h5py
+
+    try:
+        with h5py.File(path, "r") as f:
+            missing = [k for k in REQUIRED_HDF5_KEYS if k not in f]
+            if missing:
+                return f"clés absentes : {missing}"
+            n = f["rewards"].shape[0]
+            if n == 0 or any(f[k].shape[0] != n for k in REQUIRED_HDF5_KEYS):
+                return "longueurs incohérentes entre observations / actions / rewards / terminals"
+    except Exception as e:  # noqa: BLE001  (fichier tronqué, page HTML d'erreur, ...)
+        return f"illisible ({type(e).__name__}: {e})"
+    return None
+
+
+def fetch_hdf5(spec: DatasetSpec, root: str | None = None, sources=DEFAULT_SOURCES) -> Path:
+    """Renvoie le chemin local du HDF5, en le téléchargeant depuis la première source qui fonctionne."""
+    dest = dataset_root(root) / spec.filename
+    if dest.exists():
+        reason = check_hdf5(dest)
+        if reason is None:
+            return dest
+        print(f"[data] {dest} rejeté ({reason}) : nouveau téléchargement", file=sys.stderr)
+        dest.unlink()
+    errors = []
+    for source, url in spec.download_urls(tuple(sources)):
+        try:
+            download(url, dest)
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"  {source:9s} {url}\n            -> {type(e).__name__}: {e}")
+            continue
+        reason = check_hdf5(dest)
+        if reason is None:
+            print(f"[data] {spec.name} : source « {source} »", file=sys.stderr)
+            return dest
+        errors.append(f"  {source:9s} {url}\n            -> fichier rejeté : {reason}")
+        dest.unlink(missing_ok=True)
+    raise RuntimeError(
+        f"impossible d'obtenir {spec.filename} :\n" + "\n".join(errors) + "\n"
+        f"Solutions : télécharger le fichier à la main dans {dest.parent} (ou $D4RL_DATASET_DIR), "
+        f"ou passer --file <chemin> ; voir scripts/download_datasets.py.")
 
 
 # --------------------------------------------------------------------------------------
@@ -252,14 +304,16 @@ def load_dataset(
     path: str | Path | None = None,
     max_return_quantile: float = 1.0,
     keep_infos: bool = False,
+    sources=DEFAULT_SOURCES,
 ) -> OfflineDataset:
     """Charge `name` (ex. 'hopper-medium-replay-v2').
 
-    path : fichier HDF5 local à utiliser à la place du téléchargement (tests, miroirs).
+    path    : fichier HDF5 local à utiliser à la place du téléchargement (tests, copie manuelle).
+    sources : ordre des sources de téléchargement (config/data.yaml : download_sources).
     """
     spec = get_spec(name)
     if spec.backend == "hdf5":
-        file = Path(path) if path else download(spec.source, dataset_root(root) / spec.filename)
+        file = Path(path) if path else fetch_hdf5(spec, root, sources)
         trajs = load_hdf5(file, spec, keep_infos=keep_infos)
     else:
         trajs = load_minari(spec)

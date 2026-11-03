@@ -163,7 +163,7 @@ def load_curves(runs_dir: str | Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     curves, finals = [], []
     for res in sorted(Path(runs_dir).glob("*/*/seed*/results.json")):
         r = json.loads(res.read_text())
-        if "score" not in r:
+        if "score" not in r or "__" in r["method"]:  # variantes d'ablation : voir run_ablations.py
             continue
         base = {"method": r["method"], "dataset": r["dataset"], "seed": r["seed"]}
         metrics = res.parent / "metrics.jsonl"

@@ -92,7 +92,7 @@ class IQL(nn.Module):
         return self.vf(self.critic_input(obs, timesteps))
 
     # -- une itération ------------------------------------------------------------------
-    def update(self, b: dict[str, torch.Tensor]) -> dict[str, float]:
+    def update(self, b: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         t = b.get("timesteps")
         x = self.critic_input(b["observations"], t)
         x_next = self.critic_input(b["next_observations"], None if t is None else t + 1)
@@ -118,8 +118,9 @@ class IQL(nn.Module):
 
         polyak_update(self.qf, self.q_target, self.tau)
 
-        metrics = {"v_loss": v_loss.item(), "q_loss": q_loss.item(), "v_mean": v.mean().item(),
-                   "q_mean": q1.mean().item(), "adv_mean": adv.mean().item()}
+        # tenseurs détachés (pas de .item()) : la boucle d'entraînement synchronise une fois par log
+        metrics = {"v_loss": v_loss.detach(), "q_loss": q_loss.detach(), "v_mean": v.mean().detach(),
+                   "q_mean": q1.mean().detach(), "adv_mean": adv.mean().detach()}
 
         # 3) Politique : régression pondérée par l'avantage (AWR)
         if self.train_policy:
@@ -131,5 +132,5 @@ class IQL(nn.Module):
             self.pi_opt.step()
             if self.pi_sched:
                 self.pi_sched.step()
-            metrics["pi_loss"] = pi_loss.item()
+            metrics["pi_loss"] = pi_loss.detach()
         return metrics

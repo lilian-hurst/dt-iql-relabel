@@ -26,9 +26,10 @@ import pandas as pd
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from launcher import REPO, describe_jobs, load_experiment, plan_jobs, run_jobs  # noqa: E402
+from launcher import (REPO, describe_jobs, estimate, load_experiment, plan_jobs, resolve_datasets,  # noqa: E402
+                      run_jobs)
 from result_utils import dataset_order, mean_std, method_label, seed_average  # noqa: E402
-from src.utils.config import Config, load_config, load_yaml  # noqa: E402
+from src.utils.config import Config, load_config, load_experiment_config, load_yaml  # noqa: E402
 
 DEFAULT_CONFIG = HERE / "configs" / "ablations.yaml"
 PARAMS = ("dt_overrides", "iql_overrides", "cql_overrides", "relabel_overrides", "critic_overrides",
@@ -82,14 +83,35 @@ def default_value(param: str, key: str, method: str, base: Config):
     return value
 
 
+def _join(*parts: str) -> str:
+    return "/".join(p for p in parts if p)
+
+
 def load_ablations(path: str | Path = DEFAULT_CONFIG, only=None, datasets=None, seeds=None):
-    cfg = load_yaml(Path(path).resolve())
-    defaults = cfg.defaults
-    defaults.name = cfg.get("name", "ablations")  # dossier runs/<name>/ propre à ce fichier d'ablations
+    path = Path(path).resolve()
+    cfg = load_yaml(path)
+    defaults = cfg.get("defaults") or Config()
+    if cfg.get("base_experiment"):
+        # Ablations greffées sur une expérience : ses runs à la configuration par défaut (mêmes
+        # surcharges, même dossier runs/<nom>/) sont réutilisés tels quels, sans recalcul.
+        exp_path = Path(cfg.base_experiment)
+        if not exp_path.is_absolute():
+            exp_path = (path.parent / exp_path) if (path.parent / exp_path).exists() else REPO / exp_path
+        exp = load_experiment(exp_path)
+        if defaults.get("overrides"):
+            raise KeyError("base_experiment : les surcharges viennent de l'expérience, pas de defaults.overrides")
+        defaults.name, defaults.shared_root = exp.name, ""
+        defaults.overrides = Config({k: list(exp[k]) for k in PARAMS if exp[k]})
+        defaults.datasets = defaults.get("datasets") or exp.datasets
+        defaults.seeds = defaults.get("seeds") or exp.seeds
+    else:
+        defaults.name = cfg.get("name", "ablations")  # dossier runs/<name>/ propre à ce fichier
+        defaults.shared_root = SHARED
     if datasets:
         defaults.datasets = datasets
     if seeds:
         defaults.seeds = seeds
+    defaults.datasets = resolve_datasets(defaults.datasets)  # nom de suite ("mujoco") -> liste
     for k in defaults.get("overrides") or {}:
         if k not in PARAMS:
             raise KeyError(f"defaults.overrides : clé inconnue {k!r} ; choix : {PARAMS}")
@@ -109,30 +131,31 @@ def _experiment(defaults: Config, root: str, method: str, extra: tuple[str, str]
     overrides = {k: list(v) for k, v in (defaults.get("overrides") or {}).items()}
     if extra:
         overrides[extra[0]] = overrides.get(extra[0], []) + [extra[1]]
-    return load_experiment(None, name=f"{defaults.name}/{root}", datasets=list(defaults.datasets),
+    return load_experiment(None, name=_join(defaults.name, root), datasets=list(defaults.datasets),
                            seeds=list(defaults.seeds), methods=[method], output_dir=output_dir, **overrides)
 
 
 def plan_ablation(name: str, ab: Config, defaults: Config, output_dir=None):
     """Renvoie (manifeste, liste de (expérience, suffixe))."""
     methods_cfg = load_yaml("methods.yaml")
-    base = _experiment(defaults, SHARED, "dt", None, output_dir)
+    shared = defaults.shared_root
+    base = _experiment(defaults, shared, "dt", None, output_dir)
     short = ab.key.split(".")[-1]
     entries, refs, exps = [], [], []
     for v in ab["values"]:
         for m in ab.methods:
             _check_affected(ab.param, m, methods_cfg[m])
             if _same(v, default_value(ab.param, ab.key, m, base)):
-                root, suffix, extra = SHARED, "", None
+                root, suffix, extra = shared, "", None
             elif is_shared(ab.param, ab.key):
-                root, suffix, extra = SHARED, f"__{short}{fmt_value(v)}", (ab.param, f"{ab.key}={v}")
+                root, suffix, extra = shared, f"__{short}{fmt_value(v)}", (ab.param, f"{ab.key}={v}")
             else:
                 root, suffix, extra = f"{name}/{short}={fmt_value(v)}", "", (ab.param, f"{ab.key}={v}")
             exps.append((_experiment(defaults, root, m, extra, output_dir), suffix))
-            entries.append({"value": v, "value_key": fmt_value(v), "method": m, "dir": f"{root}/{m}{suffix}"})
+            entries.append({"value": v, "value_key": fmt_value(v), "method": m, "dir": _join(root, m + suffix)})
     for m in ab.get("reference_methods") or []:
-        exps.append((_experiment(defaults, SHARED, m, None, output_dir), ""))
-        refs.append({"method": m, "dir": f"{SHARED}/{m}"})
+        exps.append((_experiment(defaults, shared, m, None, output_dir), ""))
+        refs.append({"method": m, "dir": _join(shared, m)})
     manifest = {
         "ablation": name, "suite": defaults.name, "label": ab.get("label", name), "param": ab.param,
         "key": ab.key,
@@ -145,7 +168,7 @@ def plan_ablation(name: str, ab: Config, defaults: Config, output_dir=None):
 
 
 def ablations_root(output_dir=None, name: str = "ablations") -> Path:
-    base = Path(output_dir or load_yaml("experiment.yaml").output_dir)
+    base = Path(output_dir or load_experiment_config().output_dir)
     return (base if base.is_absolute() else REPO / base) / name
 
 
@@ -271,6 +294,8 @@ def main() -> int:
     for j in jobs:  # noms uniques entre dossiers (shared/, <ablation>/<valeur>/) : logs distincts
         j.name = j.done_file.parent.relative_to(root).as_posix()
     print(f"[ablations] {', '.join(ablations)} : {len(jobs)} jobs uniques ({describe_jobs(jobs)}) -> {root}")
+    pending = [j for j in jobs if a.force or not j.done_file.exists()]
+    print(f"[ablations] {len(pending)} à exécuter : {estimate(pending, a.jobs)}")
 
     status = {}
     if not a.report_only:

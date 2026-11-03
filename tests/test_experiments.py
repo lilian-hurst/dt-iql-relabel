@@ -81,3 +81,41 @@ def test_aggregate(tmp_path):
     md = (tmp_path / "out" / "table.md").read_text()
     assert "**85.0 ± 5.0**" in md
     assert (tmp_path / "out" / "table.tex").read_text().startswith("\\begin{tabular}")
+
+
+def test_method_datasets(tmp_path):
+    exp = load_experiment(None, datasets="mujoco", methods=["dt", "iql_dt"], seeds=[0],
+                          method_datasets={"iql_dt": [NAME]}, output_dir=str(tmp_path))
+    jobs = plan_jobs(exp)
+    dt = [j for j in jobs if j.name.startswith("dt/")]
+    iql_dt = [j for j in jobs if j.name.startswith("iql_dt/")]
+    assert len(dt) == 9 and [j.name for j in iql_dt] == [f"iql_dt/{NAME}/s0"]
+    with pytest.raises(KeyError):
+        plan_jobs(load_experiment(None, methods=["dt"], datasets=[NAME], method_datasets={"qdt": [NAME]}))
+
+
+def test_estimate(tmp_path, monkeypatch):
+    import launcher
+    from src.utils.config import Config
+
+    exp = load_experiment(Path(__file__).parents[1] / "experiments/configs/smoke.yaml", output_dir=str(tmp_path))
+    jobs = plan_jobs(exp)
+    monkeypatch.setattr(launcher, "load_experiment_config", lambda: Config({"throughput": {}}))
+    assert "benchmark_device" in launcher.estimate(jobs)
+    monkeypatch.setattr(launcher, "load_experiment_config",
+                        lambda: Config({"throughput": {"dt": 100.0, "iql": 500.0, "cql": 100.0}}))
+    dt_job = next(j for j in jobs if j.name.startswith("dt/"))
+    assert launcher.job_hours(dt_job, {"dt": 100.0}) == pytest.approx(200 / 100 / 3600 + 0.15)  # smoke : 200 pas
+    assert "avec --jobs 4" in launcher.estimate(jobs, workers=4)
+
+
+def test_parallel_jobs_split_cpu_threads(tmp_path, monkeypatch):
+    monkeypatch.delenv("DTIQL_THREADS", raising=False)
+    code = "import os; open(r'{done}', 'w').write(os.environ.get('DTIQL_THREADS', ''))"
+    jobs = [_job(tmp_path, f"j{i}", code) for i in range(2)]
+    run_jobs(jobs, tmp_path, workers=2)
+    expected = str(max(1, (__import__("os").cpu_count() or 1) // 2))
+    assert all(j.done_file.read_text() == expected for j in jobs)
+    single = _job(tmp_path, "solo", code)
+    run_jobs([single], tmp_path, workers=1)
+    assert single.done_file.read_text() == ""            # un seul job : threads par défaut

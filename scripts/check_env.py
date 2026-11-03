@@ -55,9 +55,12 @@ def check_packages(kitchen: bool) -> bool:
     try:
         import torch
 
-        cuda = torch.cuda.is_available()
-        dev = torch.cuda.get_device_name(0) if cuda else "CPU uniquement"
-        print(f"  [{OK if cuda else WARN}] CUDA : {dev}")
+        if torch.cuda.is_available():
+            print(f"  [{OK}] GPU CUDA : {torch.cuda.get_device_name(0)}")
+        elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+            print(f"  [{OK}] GPU Apple Silicon (MPS) ; comparer cpu et mps : python scripts/benchmark_device.py")
+        else:
+            print(f"  [{WARN}] aucun GPU : entraînement sur CPU")
     except ImportError:
         pass
     return ok
