@@ -1,0 +1,8 @@
+# Paramètres globaux d'une exécution.
+seeds: [0, 1, 2, 3, 4]
+device: auto              # auto | cpu | cuda | cuda:0 ...
+output_dir: runs          # runs/<method>/<dataset>/seed<k>/
+logger:
+  backend: tensorboard    # tensorboard | wandb | csv
+  project: dt-iql-relabel
+deterministic: false      # torch.use_deterministic_algorithms (plus lent)

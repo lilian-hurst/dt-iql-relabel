@@ -1,0 +1,37 @@
+# Relabellisation des return-to-go (RTG) avant l'entraînement du DT (src/training/relabel_returns.py).
+#
+# Notations : R_t = RTG non actualisé du dataset (celui du DT), G^γ_t = return Monte-Carlo actualisé,
+# Q, V = critique entraîné avec le discount γ (valeurs remises à l'échelle des récompenses brutes).
+#
+# rule :
+#   none   -> DT vanilla.
+#   max_q  -> R̂_t = R_t + alpha * max(0, Q(s_t, a_t) - G^γ_t)
+#             γ = 1, alpha = 1  =>  R̂_t = max(R_t, Q(s_t, a_t))   (règle du projet)
+#   qdt    -> récursion arrière façon QDT (Yamagata et al. 2023) :
+#             gap_{t+1} = alpha * max(0, V(s_{t+1}) - Ĝ_{t+1})
+#             Ĝ_t = r_t + γ (Ĝ_{t+1} + gap_{t+1}) ;  R̂_t = r_t + R̂_{t+1} + gap_{t+1}
+#             γ = 1  =>  R̂_t = r_t + max(R̂_{t+1}, V(s_{t+1}))   (règle QDT)
+# Avec γ < 1 le gain est mesuré en unités actualisées : version conservatrice de la règle.
+rule: max_q
+value_source: iql         # iql (notre méthode) | cql (critique de QDT)
+alpha: 1.0                # force de relabellisation (ablation)
+min_improvement: 0.0      # seuil : gain ignoré s'il est < min_improvement * |G^γ_t| (ablation)
+
+# Critiques de relabellisation, un par value_source : `overrides` est appliqué à <value_source>.yaml
+# quand le critique est entraîné (lanceur d'expériences, ou relabel_returns.py --train-critic).
+# Sauvegarde : runs/<method>/<dataset>/seed<k>/model.pt. Mêmes γ et time_feature pour les deux
+# critiques : seule la façon d'apprendre la valeur (in-sample vs conservatrice) diffère.
+critics:
+  iql:
+    method: iql_critic
+    overrides:
+      - train.discount=0.995
+      - model.time_feature=true
+      - train.train_policy=false
+  cql:
+    method: cql_critic
+    overrides:
+      - train.discount=0.995
+      - model.time_feature=true
+      - train.train_policy=false
+checkpoint: ""            # chemin explicite ; vide => runs/<critics.<source>.method>/<dataset>/seed<k>/model.pt

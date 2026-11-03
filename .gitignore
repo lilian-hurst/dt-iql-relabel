@@ -1,0 +1,11 @@
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+# Données et sorties (volumineuses, regénérables)
+datasets/
+runs/
+checkpoints/
+results/
+figures/
+wandb/

@@ -1,0 +1,8 @@
+# Réglage « stitching » : on retire la meilleure moitié des trajectoires (max_return_quantile=0.5).
+# Aucune trajectoire complète n'est alors optimale : dépasser le meilleur return du dataset
+# exige d'assembler des morceaux de trajectoires.
+name: stitching_q0.5
+datasets: [halfcheetah-medium-replay-v2, hopper-medium-replay-v2, walker2d-medium-replay-v2]
+methods: [dt, iql, qdt, iql_dt, iql_qdt]
+seeds: [0, 1, 2, 3, 4]
+data_overrides: [max_return_quantile=0.5]

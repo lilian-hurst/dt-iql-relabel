@@ -1,0 +1,34 @@
+# Méthodes comparées par experiments/run_experiments.py.
+#   train   : dt | iql | cql
+#   relabel : surcharges de config/relabel.yaml -> DT entraîné sur les RTG relabellisés
+#             (le lanceur entraîne d'abord le critique, puis relabellise).
+#
+# Le croisement {critique IQL, critique CQL} x {règle max_q, règle qdt} sépare l'effet du
+# critique de celui de la règle : iql_dt vs iql_qdt (règle), iql_qdt vs qdt (critique).
+
+dt:
+  train: dt
+  label: DT
+
+iql:
+  train: iql
+  label: IQL
+
+cql:
+  train: cql
+  label: CQL
+
+qdt:                      # baseline QDT (Yamagata et al. 2023) : critique CQL + relabellisation récursive
+  train: dt
+  label: QDT
+  relabel: {value_source: cql, rule: qdt}
+
+iql_dt:                   # notre méthode : critique IQL + R̂_t = max(R_t, Q(s_t, a_t))
+  train: dt
+  label: IQL-DT
+  relabel: {value_source: iql, rule: max_q}
+
+iql_qdt:                  # contrôle : critique IQL + relabellisation récursive de QDT
+  train: dt
+  label: IQL-DT (règle QDT)
+  relabel: {value_source: iql, rule: qdt}

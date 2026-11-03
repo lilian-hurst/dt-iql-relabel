@@ -1,0 +1,39 @@
+# Test rapide de toute la chaîne des ablations (quelques minutes, scores non significatifs).
+#   python experiments/run_ablations.py --config experiments/configs/ablations_smoke.yaml
+# Dossier séparé (runs/ablations_smoke/) : aucun run de test ne peut être réutilisé par les vraies ablations.
+name: ablations_smoke
+
+defaults:
+  datasets: [hopper-medium-replay-v2]
+  seeds: [0]
+  overrides:
+    dt_overrides: [train.max_steps=200, train.warmup_steps=50, train.log_every=100, train.eval_every=0,
+                   eval.final_episodes=2]
+    iql_overrides: [train.max_steps=500, train.log_every=250, train.eval_every=0, eval.final_episodes=2]
+    cql_overrides: [train.max_steps=500, train.log_every=250, train.eval_every=0, eval.final_episodes=2]
+    critic_overrides: [train.max_steps=500, train.log_every=250]
+
+ablations:
+  context_len:
+    label: Longueur de contexte K
+    param: dt_overrides
+    key: model.context_len
+    values: [1, 20]
+    methods: [dt, iql_dt]
+    reference_methods: [iql]
+
+  relabel_strength:
+    label: Force de relabellisation α
+    param: relabel_overrides
+    key: alpha
+    values: [0.0, 1.0]
+    methods: [iql_dt]
+    reference_methods: [dt]
+
+  dataset_quality:
+    label: Quantile de return des trajectoires conservées
+    param: data_overrides
+    key: max_return_quantile
+    values: [0.5, 1.0]
+    methods: [dt, iql_dt]
+    reference_methods: []
