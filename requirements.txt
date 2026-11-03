@@ -1,0 +1,20 @@
+# Core
+torch>=2.2
+numpy>=1.24
+pyyaml>=6.0
+tqdm>=4.66
+
+# Environnements & données
+gymnasium[mujoco]>=1.0      # Hopper/HalfCheetah/Walker2d-v4 (MuJoCo >= 3)
+mujoco>=3.0
+h5py>=3.9                   # datasets D4RL v2 (HDF5 officiels)
+
+# Logging
+tensorboard>=2.14
+# wandb>=0.16               # optionnel : logger.backend=wandb
+
+# Analyse / figures (matplotlib seul, voir experiments/plotting.py)
+pandas>=2.0
+matplotlib>=3.8
+
+# Franka Kitchen (optionnel) : pip install -r requirements-kitchen.txt

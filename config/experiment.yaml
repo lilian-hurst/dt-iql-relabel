@@ -1,0 +1,20 @@
+# Paramètres globaux d'une exécution. Les réglages propres à une machine vont dans
+# config/experiment.local.yaml (non versionné, écrit par scripts/benchmark_device.py --write),
+# qui complète ce fichier.
+seeds: [0, 1, 2, 3, 4]
+output_dir: runs          # runs/<method>/<dataset>/seed<k>/
+
+# Calcul. Priorité : argument --device > variable DTIQL_DEVICE > devices[algo] > device.
+device: auto              # auto (cuda > mps > cpu) | cpu | cuda | mps
+devices: {}               # par algorithme, ex. {dt: mps, iql: cpu, cql: cpu}
+# Threads PyTorch CPU par processus (0 = défaut PyTorch). Avec --jobs N, le lanceur répartit
+# automatiquement les cœurs entre les jobs (variable DTIQL_THREADS).
+threads: 0
+# Pas d'entraînement par seconde mesurés sur cette machine (scripts/benchmark_device.py) :
+# utilisés par --dry-run pour estimer la durée d'une expérience. Ex. {dt: 80.0, iql: 600.0, cql: 150.0}
+throughput: {}
+
+logger:
+  backend: tensorboard    # tensorboard | wandb | csv
+  project: dt-iql-relabel
+deterministic: false      # torch.use_deterministic_algorithms (plus lent)

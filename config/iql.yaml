@@ -1,0 +1,37 @@
+# Implicit Q-Learning — hyperparamètres du papier (Kostrikov et al. 2022, Appendix B).
+model:
+  hidden_dims: [256, 256]
+  policy_dropout: 0.0     # 0.1 pour Kitchen (per_domain)
+  log_std_min: -5.0
+  log_std_max: 2.0
+  # Ajoute t / H en entrée de Q et V (pas de la politique). Utilisé par le critique de
+  # relabellisation : sur un horizon fini avec gamma ~ 1, la valeur dépend du temps restant.
+  time_feature: false
+
+train:
+  batch_size: 256
+  critic_lr: 3.0e-4
+  policy_lr: 3.0e-4
+  discount: 0.99
+  tau: 0.005              # mise à jour Polyak des Q cibles
+  expectile: 0.7          # τ de la loss expectile L2^τ sur V
+  beta: 3.0               # température inverse AWR : poids exp(beta * A)
+  exp_adv_max: 100.0
+  max_steps: 1000000
+  train_policy: true      # false pour un critique de relabellisation seul (2x plus rapide)
+  policy_cosine_schedule: true
+  # auto : Gym-MuJoCo r <- r * 1000 / (max_return - min_return) ; Kitchen : inchangé.
+  # none : pas de normalisation.
+  reward_normalization: auto
+  log_every: 5000
+  eval_every: 100000      # 0 = pas d'évaluation intermédiaire
+  checkpoint_every: 250000
+
+per_domain:
+  kitchen:
+    model.policy_dropout: 0.1
+    train.beta: 0.5
+
+eval:
+  episodes: 10
+  final_episodes: 100

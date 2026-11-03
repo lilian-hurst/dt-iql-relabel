@@ -1,0 +1,35 @@
+# Données offline. Le backend est fixé par tâche dans src/data/registry.py :
+#   Gym-MuJoCo   -> fichiers HDF5 officiels D4RL v2 (ceux du papier DT), téléchargés une fois
+#                   dans `root`, évalués dans Gymnasium <Env>-v4 (MuJoCo 3).
+#   Franka Kitchen -> Minari D4RL/kitchen/*-v2, évalué dans FrankaKitchen-v1 (Gymnasium-Robotics).
+root: datasets            # surchargé par la variable d'env. D4RL_DATASET_DIR si définie
+# Sources des HDF5 Gym-MuJoCo, essayées dans l'ordre (src/data/registry.py) :
+#   official  : serveur du RAIL (Berkeley), origine des données du papier DT
+#   hf_mirror : mêmes fichiers HDF5 sur Hugging Face (dataset imone/D4RL)
+# Un fichier téléchargé est vérifié (ouverture HDF5, clés attendues) avant d'être conservé.
+download_sources: [official, hf_mirror]
+
+# Pré-traitement commun (l'horizon de chaque tâche est fixé par le registre : 1000 MuJoCo, 450 Kitchen)
+normalize_states: true    # (s - mean) / std calculés sur le dataset (DT et IQL)
+
+# Filtrage par qualité (ablation "dataset quality" / réglage stitching).
+# On ne garde que les trajectoires dont le return est <= quantile `max_return_quantile`.
+# 1.0 = dataset complet ; 0.5 = on retire la meilleure moitié des trajectoires.
+max_return_quantile: 1.0
+
+# Ensembles de tâches utilisés par experiments/
+suites:
+  mujoco:
+    - halfcheetah-medium-v2
+    - halfcheetah-medium-replay-v2
+    - halfcheetah-medium-expert-v2
+    - hopper-medium-v2
+    - hopper-medium-replay-v2
+    - hopper-medium-expert-v2
+    - walker2d-medium-v2
+    - walker2d-medium-replay-v2
+    - walker2d-medium-expert-v2
+  kitchen:
+    - kitchen-complete-v2
+    - kitchen-partial-v2
+    - kitchen-mixed-v2

@@ -1,0 +1,10 @@
+# Test rapide de toute la chaîne (quelques minutes, scores non significatifs).
+name: smoke
+datasets: [hopper-medium-replay-v2]
+methods: [dt, iql, qdt, iql_dt]
+seeds: [0]
+dt_overrides: [train.max_steps=200, train.warmup_steps=50, train.log_every=100, train.eval_every=0,
+               eval.final_episodes=2]
+iql_overrides: [train.max_steps=500, train.log_every=250, train.eval_every=0, eval.final_episodes=2]
+cql_overrides: [train.max_steps=500, train.log_every=250, train.eval_every=0, eval.final_episodes=2]
+critic_overrides: [train.max_steps=500, train.log_every=250]

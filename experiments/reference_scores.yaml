@@ -1,0 +1,28 @@
+# Scores normalisés D4RL publiés, pour juger la reproduction (colonnes "(papier)" de aggregate.py).
+# Recopiés de mémoire des tableaux des articles : À VÉRIFIER contre les PDF avant de les citer.
+#   DT  : Chen et al. 2021, Table 2 (moyenne ± écart-type).
+#   IQL, CQL : Kostrikov et al. 2022, Table 1 (CQL : colonne reprise dans cet article).
+DT (papier):
+  halfcheetah-medium-v2: [42.6, 0.1]
+  hopper-medium-v2: [67.6, 1.0]
+  walker2d-medium-v2: [74.0, 1.4]
+  halfcheetah-medium-replay-v2: [36.6, 0.8]
+  hopper-medium-replay-v2: [82.7, 7.0]
+  walker2d-medium-replay-v2: [66.6, 3.0]
+  halfcheetah-medium-expert-v2: [86.8, 1.3]
+  hopper-medium-expert-v2: [107.6, 1.8]
+  walker2d-medium-expert-v2: [108.1, 0.2]
+IQL (papier):
+  halfcheetah-medium-v2: [47.4, null]
+  hopper-medium-v2: [66.3, null]
+  walker2d-medium-v2: [78.3, null]
+  halfcheetah-medium-replay-v2: [44.2, null]
+  hopper-medium-replay-v2: [94.7, null]
+  walker2d-medium-replay-v2: [73.9, null]
+  halfcheetah-medium-expert-v2: [86.7, null]
+  hopper-medium-expert-v2: [91.5, null]
+  walker2d-medium-expert-v2: [109.6, null]
+  kitchen-complete-v2: [62.5, null]
+  kitchen-partial-v2: [46.3, null]
+  kitchen-mixed-v2: [51.0, null]
+# Les scores Kitchen des articles portent sur kitchen-*-v0 (D4RL) ; nos données sont Minari *-v2.

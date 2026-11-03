@@ -1,0 +1,8 @@
+# Franka Kitchen (manipulation, récompense creuse, horizon 450 dans Minari v2) : tâche de référence pour le stitching.
+# Requiert : pip install -e ".[kitchen]"
+name: kitchen
+datasets: kitchen
+methods: [dt, iql, qdt, iql_dt, iql_qdt]
+seeds: [0, 1, 2, 3, 4]
+# Évaluation intermédiaire moins fréquente : le simulateur Kitchen est ~15x plus lent que MuJoCo Gym.
+dt_overrides: [train.eval_every=50000]

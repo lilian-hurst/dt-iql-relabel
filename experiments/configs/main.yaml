@@ -1,0 +1,12 @@
+# Comparaison principale (Phase 1 + 2) : D4RL Gym-MuJoCo, 9 datasets x 5 seeds.
+name: main
+datasets: mujoco          # suite de config/data.yaml, ou liste explicite
+methods: [dt, iql, qdt, iql_dt, iql_qdt]
+seeds: [0, 1, 2, 3, 4]
+# Surcharges optionnelles (listes de "clé=valeur") :
+dt_overrides: []
+iql_overrides: []
+cql_overrides: []
+critic_overrides: []      # ajoutées aux critiques de relabellisation (IQL et CQL)
+relabel_overrides: []
+data_overrides: []

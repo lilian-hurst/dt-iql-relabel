@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dt-iql-relabel"
+version = "0.1.0"
+description = "Reproduction de Decision Transformer et relabellisation des return-to-go par IQL (AI for Robotics, Track 1)"
+requires-python = ">=3.10"
+dependencies = [
+  "torch>=2.2",
+  "numpy>=1.24",
+  "pyyaml>=6.0",
+  "tqdm>=4.66",
+  "gymnasium[mujoco]>=1.0",
+  "mujoco>=3.0",
+  "h5py>=3.9",
+  "tensorboard>=2.14",
+  "pandas>=2.0",
+  "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+kitchen = ["minari[hdf5,hf]>=0.5", "gymnasium-robotics>=1.3"]
+wandb = ["wandb>=0.16"]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,31 @@
+# Conservative Q-Learning — critique de la baseline QDT (Yamagata et al. 2023) et baseline optionnelle.
+# Valeurs du dépôt officiel CQL pour Gym-MuJoCo (min_q_weight=5, sans Lagrange, importance sampling).
+model:
+  hidden_dims: [256, 256, 256]
+  log_std_min: -20.0
+  log_std_max: 2.0
+  time_feature: false     # t / H en entrée de Q (critique de relabellisation à horizon fini)
+
+train:
+  batch_size: 256
+  critic_lr: 3.0e-4
+  policy_lr: 1.0e-4
+  alpha_lr: 1.0e-4
+  discount: 0.99
+  tau: 0.005
+  cql_alpha: 5.0          # poids de la pénalité conservatrice
+  cql_n_actions: 10       # actions échantillonnées par source pour le logsumexp
+  cql_temp: 1.0
+  bc_steps: 0             # pas de clonage comportemental initial de la politique
+  value_estimate: mean    # V(s) = mean | max de Q sur les actions de la politique
+  value_samples: 10
+  max_steps: 1000000
+  train_policy: true      # false : la politique est entraînée (requise par CQL) mais pas évaluée
+  reward_normalization: auto
+  log_every: 5000
+  eval_every: 100000
+  checkpoint_every: 250000
+
+eval:
+  episodes: 10
+  final_episodes: 100

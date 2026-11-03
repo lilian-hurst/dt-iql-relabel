@@ -1,0 +1,68 @@
+# Ablations (Phase 3) — experiments/run_ablations.py
+#
+# Chaque ablation fait varier UN paramètre `key` (injecté dans la liste de surcharges `param` du
+# lanceur) pour les méthodes `methods`. Les `reference_methods`, que ce paramètre n'affecte pas,
+# sont lancées une seule fois et tracées en pointillés.
+#   param : dt_overrides      -> config/dt.yaml          (méthodes entraînant un DT)
+#           relabel_overrides -> config/relabel.yaml     (méthodes avec relabellisation)
+#           critic_overrides  -> iql.yaml/cql.yaml des critiques de relabellisation
+#           data_overrides    -> config/data.yaml        (toutes les méthodes)
+#           iql_overrides / cql_overrides -> baselines IQL / CQL
+#
+# Réutilisation des calculs : tous les runs à la configuration par défaut vivent dans
+# runs/ablations/shared/ et servent à toutes les ablations (ex. K=20, α=1 et seuil=0 sont le même run).
+# Les valeurs qui ne changent ni les données ni le critique (dt_overrides, alpha, min_improvement, ...)
+# partagent aussi critiques et relabellisations ; les autres ont leur propre dossier.
+#
+# Coût (3 datasets x 3 seeds, toutes les ablations) : 567 jobs dont 135 entraînements IQL/CQL
+# de 1M pas. Pour un budget réduit, voir `defaults.overrides` ou --only / --seeds.
+
+name: ablations           # runs/ablations/, results/ablations/, figures/ablations/
+
+defaults:
+  datasets: [halfcheetah-medium-replay-v2, hopper-medium-replay-v2, walker2d-medium-replay-v2]
+  seeds: [0, 1, 2]
+  # Surcharges communes à tous les runs (mêmes clés que experiments/configs/*.yaml), ex. budget réduit :
+  #   dt_overrides: [train.max_steps=50000]
+  overrides: {}
+
+ablations:
+  context_len:
+    label: Longueur de contexte K
+    param: dt_overrides
+    key: model.context_len
+    values: [1, 5, 20]
+    methods: [dt, iql_dt]
+    reference_methods: [iql]
+
+  relabel_strength:
+    label: Force de relabellisation α
+    param: relabel_overrides
+    key: alpha
+    values: [0.0, 0.25, 0.5, 1.0]     # α = 0 : RTG inchangés, doit reproduire DT (contrôle de cohérence)
+    methods: [iql_dt, qdt]
+    reference_methods: [dt, iql]
+
+  q_threshold:
+    label: Seuil de gain minimal (fraction de |G|)
+    param: relabel_overrides
+    key: min_improvement
+    values: [0.0, 0.05, 0.1, 0.25]
+    methods: [iql_dt]
+    reference_methods: [dt]
+
+  critic_discount:
+    label: γ du critique de relabellisation
+    param: critic_overrides
+    key: train.discount
+    values: [0.99, 0.995, 0.999, 1.0]   # γ = 1 : règle exacte max(R_t, Q(s_t, a_t))
+    methods: [iql_dt]
+    reference_methods: [dt]
+
+  dataset_quality:
+    label: Quantile de return des trajectoires conservées
+    param: data_overrides
+    key: max_return_quantile
+    values: [0.25, 0.5, 0.75, 1.0]    # 0.5 : la meilleure moitié des trajectoires est retirée
+    methods: [dt, iql, qdt, iql_dt]
+    reference_methods: []
